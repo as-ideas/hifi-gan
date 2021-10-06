@@ -57,7 +57,10 @@ def train(rank, a, h):
         generator.load_state_dict(state_dict_g['generator'])
         mpd.load_state_dict(state_dict_do['mpd'])
         msd.load_state_dict(state_dict_do['msd'])
-        auto.load_state_dict(state_dict_do['auto'])
+        try:
+            auto.load_state_dict(state_dict_do['auto'])
+        except Exception as e:
+            print(e)
         steps = state_dict_do['steps'] + 1
         last_epoch = state_dict_do['epoch']
 
@@ -74,7 +77,10 @@ def train(rank, a, h):
     if state_dict_do is not None:
         optim_g.load_state_dict(state_dict_do['optim_g'])
         optim_d.load_state_dict(state_dict_do['optim_d'])
-        optim_a.load_state_dict(state_dict_do['optim_a'])
+        try:
+            optim_a.load_state_dict(state_dict_do['optim_a'])
+        except Exception as e:
+            print(e)
 
     scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=h.lr_decay, last_epoch=last_epoch)
     scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=h.lr_decay, last_epoch=last_epoch)
