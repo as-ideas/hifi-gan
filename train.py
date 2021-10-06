@@ -191,7 +191,9 @@ def train(rank, a, h):
                                                          else mpd).state_dict(),
                                      'msd': (msd.module if h.num_gpus > 1
                                                          else msd).state_dict(),
+                                     'auto': auto.state_dict(),
                                      'optim_g': optim_g.state_dict(), 'optim_d': optim_d.state_dict(), 'steps': steps,
+                                     'optim_a': optim_a.state_dict(),
                                      'epoch': epoch})
 
                 # Tensorboard summary logging
@@ -206,6 +208,7 @@ def train(rank, a, h):
                     generator.eval()
                     torch.cuda.empty_cache()
                     val_err_tot = 0
+                    val_err_auto_tot = 0
                     with torch.no_grad():
                         for j, batch in enumerate(validation_loader):
                             x, y, _, y_mel = batch
@@ -237,7 +240,7 @@ def train(rank, a, h):
                             y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate,
                                                           h.hop_size, h.win_size,
                                                           h.fmin, h.fmax_for_loss)
-                            val_err_tot += F.l1_loss(y_mel, y_g_hat_mel).item()
+                            val_err_auto_tot += F.l1_loss(y_mel, y_g_hat_mel).item()
 
                             if j <= 4:
                                 if steps == 0:
@@ -263,7 +266,9 @@ def train(rank, a, h):
 
 
                         val_err = val_err_tot / (j+1)
+                        val_err_auto = val_err_auto_tot / (j+1)
                         sw.add_scalar("validation/mel_spec_error", val_err, steps)
+                        sw.add_scalar("validation/mel_spec_auto_error", val_err_auto, steps)
 
                     generator.train()
 
