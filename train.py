@@ -27,7 +27,11 @@ def train(rank, a, h):
                            world_size=h.dist_config['world_size'] * h.num_gpus, rank=rank)
 
     torch.cuda.manual_seed(h.seed)
-    device = torch.device('cuda:{:d}'.format(rank))
+
+    if torch.cuda.is_available():
+        device = torch.device('cuda:{:d}'.format(rank))
+    else:
+        device = torch.device('cpu')
 
     generator = Generator(h).to(device)
     mpd = MultiPeriodDiscriminator().to(device)
@@ -230,10 +234,10 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--group_name', default=None)
-    parser.add_argument('--input_wavs_dir', default='LJSpeech-1.1/wavs')
+    parser.add_argument('--input_wavs_dir', default='~/datasets/asvoice2_splitted_train/wavs')
     parser.add_argument('--input_mels_dir', default='ft_dataset')
-    parser.add_argument('--input_training_file', default='LJSpeech-1.1/training.txt')
-    parser.add_argument('--input_validation_file', default='LJSpeech-1.1/validation.txt')
+    parser.add_argument('--input_training_file', default='asvoice2_train.txt')
+    parser.add_argument('--input_validation_file', default='asvoice2_val.txt')
     parser.add_argument('--checkpoint_path', default='cp_hifigan')
     parser.add_argument('--config', default='')
     parser.add_argument('--training_epochs', default=3100, type=int)
