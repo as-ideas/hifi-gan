@@ -14,8 +14,8 @@ from torch.distributed import init_process_group
 from torch.nn.parallel import DistributedDataParallel
 from env import AttrDict, build_env
 from meldataset import MelDataset, mel_spectrogram, get_dataset_filelist
-from models import Generator, MultiPeriodDiscriminator, MultiScaleDiscriminator, feature_loss, generator_loss,\
-    discriminator_loss
+from models import Generator, MultiPeriodDiscriminator, MultiScaleDiscriminator, feature_loss, generator_loss, \
+    discriminator_loss, Autoencoder
 from utils import plot_spectrogram, scan_checkpoint, load_checkpoint, save_checkpoint
 
 torch.backends.cudnn.benchmark = True
@@ -36,6 +36,7 @@ def train(rank, a, h):
     generator = Generator(h).to(device)
     mpd = MultiPeriodDiscriminator().to(device)
     msd = MultiScaleDiscriminator().to(device)
+    auto = Autoencoder().to(device)
 
     if rank == 0:
         print(generator)
@@ -56,6 +57,7 @@ def train(rank, a, h):
         generator.load_state_dict(state_dict_g['generator'])
         mpd.load_state_dict(state_dict_do['mpd'])
         msd.load_state_dict(state_dict_do['msd'])
+        auto.load_state_dict(state_dict_do['auto'])
         steps = state_dict_do['steps'] + 1
         last_epoch = state_dict_do['epoch']
 
@@ -67,10 +69,12 @@ def train(rank, a, h):
     optim_g = torch.optim.AdamW(generator.parameters(), h.learning_rate, betas=[h.adam_b1, h.adam_b2])
     optim_d = torch.optim.AdamW(itertools.chain(msd.parameters(), mpd.parameters()),
                                 h.learning_rate, betas=[h.adam_b1, h.adam_b2])
+    optim_a = torch.optim.AdamW(auto.parameters(), h.learning_rate, betas=[h.adam_b1, h.adam_b2])
 
     if state_dict_do is not None:
         optim_g.load_state_dict(state_dict_do['optim_g'])
         optim_d.load_state_dict(state_dict_do['optim_d'])
+        optim_a.load_state_dict(state_dict_do['optim_a'])
 
     scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=h.lr_decay, last_epoch=last_epoch)
     scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=h.lr_decay, last_epoch=last_epoch)
@@ -118,10 +122,18 @@ def train(rank, a, h):
             if rank == 0:
                 start_b = time.time()
             x, y, _, y_mel = batch
+
             x = torch.autograd.Variable(x.to(device, non_blocking=True))
             y = torch.autograd.Variable(y.to(device, non_blocking=True))
             y_mel = torch.autograd.Variable(y_mel.to(device, non_blocking=True))
             y = y.unsqueeze(1)
+
+            x_a = auto(x)
+            loss_a = F.l1_loss(x_a, x)
+            optim_a.zero_grad()
+            loss_a.backward()
+            optim_a.step()
+            x = x_a.detach()
 
             y_g_hat = generator(x)
             y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate, h.hop_size, h.win_size,
@@ -186,9 +198,11 @@ def train(rank, a, h):
                 if steps % a.summary_interval == 0:
                     sw.add_scalar("training/gen_loss_total", loss_gen_all, steps)
                     sw.add_scalar("training/mel_spec_error", mel_error, steps)
+                    sw.add_scalar("training/auto_spec_error", loss_a, steps)
 
                 # Validation
                 if steps % a.validation_interval == 0:  # and steps != 0:
+                    print('validate...')
                     generator.eval()
                     torch.cuda.empty_cache()
                     val_err_tot = 0
@@ -214,6 +228,40 @@ def train(rank, a, h):
                                 sw.add_figure('generated/y_hat_spec_{}'.format(j),
                                               plot_spectrogram(y_hat_spec.squeeze(0).cpu().numpy()), steps)
 
+                            # AUTOENCODED MEL
+                            x, y, _, y_mel = batch
+                            with torch.no_grad():
+                                x = auto(x)
+                            y_g_hat = generator(x.to(device))
+                            y_mel = torch.autograd.Variable(y_mel.to(device, non_blocking=True))
+                            y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate,
+                                                          h.hop_size, h.win_size,
+                                                          h.fmin, h.fmax_for_loss)
+                            val_err_tot += F.l1_loss(y_mel, y_g_hat_mel).item()
+
+                            if j <= 4:
+                                if steps == 0:
+                                    sw.add_audio('gt/y_{}'.format(j), y[0], steps, h.sampling_rate)
+                                    sw.add_figure('gt/y_auto_spec_{}'.format(j), plot_spectrogram(x[0]), steps)
+
+                                sw.add_audio('generated/y_auto_hat_{}'.format(j), y_g_hat[0], steps, h.sampling_rate)
+                                y_hat_spec = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels,
+                                                             h.sampling_rate, h.hop_size, h.win_size,
+                                                             h.fmin, h.fmax)
+                                sw.add_figure('generated/y_auto_hat_spec_{}'.format(j),
+                                              plot_spectrogram(y_hat_spec.squeeze(0).cpu().numpy()), steps)
+
+                                sw.add_figure('generated/autoencoded_spec_{}'.format(j),
+                                              plot_spectrogram(x.squeeze(0).cpu().numpy()), steps)
+
+
+
+
+
+
+
+
+
                         val_err = val_err_tot / (j+1)
                         sw.add_scalar("validation/mel_spec_error", val_err, steps)
 
@@ -234,7 +282,7 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--group_name', default=None)
-    parser.add_argument('--input_wavs_dir', default='~/datasets/asvoice2_splitted_train/wavs')
+    parser.add_argument('--input_wavs_dir', default='/Users/cschaefe/datasets/asvoice2_splitted_train')
     parser.add_argument('--input_mels_dir', default='ft_dataset')
     parser.add_argument('--input_training_file', default='asvoice2_train.txt')
     parser.add_argument('--input_validation_file', default='asvoice2_val.txt')

@@ -2,6 +2,9 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.nn import Conv1d, ConvTranspose1d, AvgPool1d, Conv2d
+from torch.nn.modules.activation import LeakyReLU
+from torch.nn.modules.container import Sequential
+from torch.nn.modules.dropout import Dropout
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 from utils import init_weights, get_padding
 
@@ -246,6 +249,21 @@ class MultiScaleDiscriminator(torch.nn.Module):
             fmap_gs.append(fmap_g)
 
         return y_d_rs, y_d_gs, fmap_rs, fmap_gs
+
+
+class Autoencoder(torch.nn.Module):
+
+    def __init__(self, n_mels: int = 80) -> None:
+        super().__init__()
+        self.convs = Sequential(
+            Conv1d(n_mels, 128, 1),
+            LeakyReLU(0.2),
+            Dropout(0.5),
+            Conv1d(128, n_mels, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.convs(x)
 
 
 def feature_loss(fmap_r, fmap_g):
