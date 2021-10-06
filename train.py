@@ -240,8 +240,8 @@ def train(rank, a, h):
                             # AUTOENCODED MEL
                             x, y, _, y_mel = batch
                             with torch.no_grad():
-                                x = auto(x)
-                            y_g_hat = generator(x.to(device))
+                                x = auto(x.to(device))
+                            y_g_hat = generator(x)
                             y_mel = torch.autograd.Variable(y_mel.to(device, non_blocking=True))
                             y_g_hat_mel = mel_spectrogram(y_g_hat.squeeze(1), h.n_fft, h.num_mels, h.sampling_rate,
                                                           h.hop_size, h.win_size,
@@ -301,7 +301,7 @@ def main():
     parser.add_argument('--config', default='')
     parser.add_argument('--training_epochs', default=3100, type=int)
     parser.add_argument('--stdout_interval', default=5, type=int)
-    parser.add_argument('--checkpoint_interval', default=5000, type=int)
+    parser.add_argument('--checkpoint_interval', default=50000, type=int)
     parser.add_argument('--summary_interval', default=100, type=int)
     parser.add_argument('--validation_interval', default=1000, type=int)
     parser.add_argument('--fine_tuning', default=False, type=bool)
